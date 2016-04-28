@@ -17,7 +17,6 @@
 package com.android.dialer;
 
 import android.app.ActionBar;
-import android.app.Activity;
 import android.app.Fragment;
 import android.app.FragmentTransaction;
 import android.content.ActivityNotFoundException;
@@ -31,7 +30,6 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
-import android.graphics.Rect;
 import android.net.ConnectivityManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -40,7 +38,6 @@ import android.os.Looper;
 import android.os.Trace;
 import android.provider.CallLog.Calls;
 import android.preference.PreferenceManager;
-import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.CommonDataKinds.SipAddress;
 import android.speech.RecognizerIntent;
@@ -49,7 +46,6 @@ import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
 import android.telephony.PhoneNumberUtils;
-import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -66,12 +62,10 @@ import android.view.ViewTreeObserver;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.widget.AbsListView.OnScrollListener;
-import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.PopupMenu;
-import android.widget.Spinner;
 import android.widget.Toast;
 
 import com.android.contacts.common.activity.TransactionSafeActivity;
@@ -89,6 +83,7 @@ import com.android.dialer.dialpad.DialpadFragment;
 import com.android.dialer.dialpad.SmartDialNameMatcher;
 import com.android.dialer.dialpad.SmartDialPrefix;
 import com.android.dialer.incall.CallMethodSpinnerHelper;
+import com.android.dialer.incall.InCallMetricsHelper;
 import com.android.dialer.interactions.PhoneNumberInteraction;
 import com.android.dialer.list.DragDropController;
 import com.android.dialer.list.ListsFragment;
@@ -110,9 +105,10 @@ import com.android.phone.common.animation.AnimUtils;
 import com.android.phone.common.ambient.AmbientConnection;
 import com.android.phone.common.incall.CreditBarHelper;
 import com.android.phone.common.incall.CallMethodInfo;
-import com.android.phone.common.incall.CallMethodHelper;
+import com.android.phone.common.incall.DialerDataSubscription;
 import com.android.phone.common.incall.CallMethodSpinnerAdapter;
-import com.android.phone.common.incall.CallMethodUtils;
+import com.android.phone.common.incall.StartInCallCallReceiver;
+import com.android.phone.common.incall.utils.CallMethodFilters;
 import com.android.phone.common.util.SettingsUtil;
 import com.android.phone.common.animation.AnimationListenerAdapter;
 
@@ -120,7 +116,6 @@ import com.cyanogen.ambient.incall.InCallServices;
 import com.cyanogen.ambient.incall.extension.StartCallRequest;
 import com.cyanogen.ambient.incall.extension.OriginCodes;
 
-import com.android.phone.common.util.StartInCallCallReceiver;
 import junit.framework.Assert;
 
 import java.util.ArrayList;
@@ -289,11 +284,11 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
     private CallMethodInfo mCurrentCallMethod;
     private String AMBIENT_SUBSCRIPTION_ID = "DialtactsActivity";
 
-    private CallMethodHelper.CallMethodReceiver pluginsUpdatedReceiver =
-            new CallMethodHelper.CallMethodReceiver() {
+    private DialerDataSubscription.PluginChanged<CallMethodInfo> pluginsUpdatedReceiver =
+            new DialerDataSubscription.PluginChanged<CallMethodInfo>() {
                 @Override
-                public void onChanged(HashMap<ComponentName, CallMethodInfo> callMethodInfos) {
-                    providersUpdated(callMethodInfos);
+                public void onChanged(HashMap<ComponentName, CallMethodInfo> pluginInfos) {
+                    providersUpdated(pluginInfos);
                 }
             };
 
@@ -321,6 +316,12 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             } else if (mRegularSearchFragment != null && mRegularSearchFragment.isVisible()) {
                 mRegularSearchFragment.setCurrentCallMethod(mCurrentCallMethod);
             }
+
+            InCallMetricsHelper.increaseCountOfMetric(
+                    mCurrentCallMethod.mComponent,
+                    InCallMetricsHelper.Events.PROVIDER_SELECTED_SPINNER,
+                    InCallMetricsHelper.Categories.INAPP_SELECTIONS,
+                    InCallMetricsHelper.Parameters.COUNT);
         }
     }
 
@@ -356,7 +357,7 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         // we may miss some data.
         updateSmartDialDatabase();
         mAvailableProviders.clear();
-        CallMethodHelper.removeDisabled(availableCallMethods, mAvailableProviders);
+        CallMethodFilters.removeDisabled(availableCallMethods, mAvailableProviders);
         if (mSmartDialSearchFragment != null) {
             mSmartDialSearchFragment.setAvailableProviders(mAvailableProviders);
         }
@@ -452,6 +453,9 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             }
 
             if (mSmartDialSearchFragment != null && mSmartDialSearchFragment.isVisible()) {
+                if (mCurrentCallMethod != null) {
+                    mSmartDialSearchFragment.setCurrentCallMethod(mCurrentCallMethod);
+                }
                 mSmartDialSearchFragment.setQueryString(mSearchQuery, false /* delaySelection */);
             } else if (mRegularSearchFragment != null && mRegularSearchFragment.isVisible()) {
                 if (mCurrentCallMethod != null) {
@@ -493,9 +497,6 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
                 if (TextUtils.isEmpty(mSearchView.getText().toString())) {
                     // If the search term is empty, close the search UI.
                     maybeExitSearchUi();
-                } else {
-                    // If the search term is not empty, show the dialpad fab.
-                    showFabInSearchUi();
                 }
             }
             return false;
@@ -554,10 +555,7 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             }
 
             @Override
-            public void onSearchViewClicked() {
-                // Hide FAB, as the keyboard is shown.
-                mFloatingActionButtonController.scaleOut();
-            }
+            public void onSearchViewClicked() {}
         });
 
         mIsLandscape = getResources().getConfiguration().orientation
@@ -675,9 +673,10 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         Trace.beginSection(TAG + " onResume");
         super.onResume();
 
-        if (CallMethodHelper.subscribe(AMBIENT_SUBSCRIPTION_ID, pluginsUpdatedReceiver)) {
-            providersUpdated(CallMethodHelper.getAllCallMethods());
-            CallMethodHelper.refreshDynamicItems();
+        DialerDataSubscription subscription = DialerDataSubscription.get(this);
+        if (subscription.subscribe(AMBIENT_SUBSCRIPTION_ID, pluginsUpdatedReceiver)) {
+            providersUpdated(subscription.getPluginInfo());
+            subscription.refreshDynamicItems();
         }
 
         mStateSaved = false;
@@ -1205,6 +1204,7 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         if (animate) {
             mListsFragment.getView().animate().alpha(0).withLayer();
         }
+        moveFabInSearchUI();
 
         mListsFragment.setUserVisibleHint(false);
     }

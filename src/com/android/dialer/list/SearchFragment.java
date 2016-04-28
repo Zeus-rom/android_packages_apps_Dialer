@@ -22,14 +22,10 @@ import android.animation.AnimatorInflater;
 import android.animation.AnimatorListenerAdapter;
 import android.app.Activity;
 import android.app.DialogFragment;
-import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.content.res.Resources;
-import android.net.Uri;
 import android.os.Bundle;
-import android.provider.ContactsContract;
-import android.telecom.PhoneAccountHandle;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.Log;
@@ -49,7 +45,6 @@ import com.android.contacts.common.list.OnPhoneNumberPickerActionListener;
 import com.android.contacts.common.list.PhoneNumberPickerFragment;
 import com.android.contacts.common.util.PermissionsUtil;
 import com.android.contacts.common.util.ViewUtil;
-import com.android.contacts.commonbind.analytics.AnalyticsUtil;
 import com.android.dialer.DialtactsActivity;
 import com.android.dialer.dialpad.DialpadFragment.ErrorDialogFragment;
 import com.android.dialer.R;
@@ -59,9 +54,10 @@ import com.android.dialer.util.IntentUtil;
 import com.android.dialer.widget.EmptyContentView;
 import com.android.phone.common.animation.AnimUtils;
 import com.android.phone.common.incall.CallMethodInfo;
-import com.android.phone.common.incall.CallMethodHelper;
 import com.android.phone.common.incall.CreditBarHelper;
 
+import com.android.phone.common.incall.DialerDataSubscription;
+import com.android.phone.common.incall.utils.CallMethodFilters;
 import com.cyanogen.ambient.incall.extension.OriginCodes;
 
 public class SearchFragment extends PhoneNumberPickerFragment
@@ -262,7 +258,8 @@ public class SearchFragment extends PhoneNumberPickerFragment
         adapter.setDisplayPhotos(true);
         adapter.setUseCallableUri(super.usesCallableUri());
         adapter.setSearchListner(this);
-        adapter.setAvailableCallMethods(CallMethodHelper.getAllEnabledCallMethods());
+        adapter.setAvailableCallMethods(CallMethodFilters.getAllEnabledCallMethods(
+                DialerDataSubscription.get(getActivity())));
         return adapter;
     }
 
@@ -296,22 +293,25 @@ public class SearchFragment extends PhoneNumberPickerFragment
         final OnPhoneNumberPickerActionListener listener;
         final Intent intent;
         final String number;
+        CallMethodInfo currentCallMethod = getCurrentCallMethod();
 
         Log.i(TAG, "onItemClick: shortcutType=" + shortcutType);
 
         switch (shortcutType) {
             case DialerPhoneNumberListAdapter.SHORTCUT_INVALID:
                 number = adapter.getQueryString();
-                if (getCurrentCallMethod().mIsInCallProvider && !PhoneNumberUtils.isEmergencyNumber(number)) {
-                    onProviderClick(position, getCurrentCallMethod());
+                if (currentCallMethod != null && currentCallMethod.mIsInCallProvider &&
+                        !PhoneNumberUtils.isEmergencyNumber(number)) {
+                    onProviderClick(position, currentCallMethod);
                 } else {
                     super.onItemClick(position, id);
                 }
                 break;
             case DialerPhoneNumberListAdapter.SHORTCUT_DIRECT_CALL:
                 number = adapter.getQueryString();
-                if (getCurrentCallMethod().mIsInCallProvider && !PhoneNumberUtils.isEmergencyNumber(number)) {
-                    placePSTNCall(number, getCurrentCallMethod());
+                if (currentCallMethod != null && currentCallMethod.mIsInCallProvider &&
+                        !PhoneNumberUtils.isEmergencyNumber(number)) {
+                    placePSTNCall(number, currentCallMethod);
                 } else {
                     listener = getOnPhoneNumberPickerListener();
                     if (listener != null && !checkForProhibitedPhoneNumber(number)) {
@@ -375,6 +375,11 @@ public class SearchFragment extends PhoneNumberPickerFragment
     public void setCurrentCallMethod(CallMethodInfo cmi) {
         if (cmi != null && !cmi.equals(mCurrentCallMethodInfo)) {
             mCurrentCallMethodInfo = cmi;
+            final DialerPhoneNumberListAdapter adapter
+                    = (DialerPhoneNumberListAdapter) getAdapter();
+            if (adapter != null) {
+                adapter.setCurrentCallMethod(cmi);
+            }
             setupEmptyView();
             setAdditionalMimeTypeSearch(cmi.mMimeType);
             reloadData();

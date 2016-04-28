@@ -13,13 +13,12 @@ import android.widget.CompoundButton;
 import android.widget.Switch;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.phone.common.ambient.AmbientConnection;
-import com.android.phone.common.incall.CallMethodHelper;
+import com.android.phone.common.incall.DialerDataSubscription;
 import com.android.phone.common.incall.CallMethodInfo;
 import com.cyanogen.ambient.callerinfo.CallerInfoServices;
 import com.cyanogen.ambient.callerinfo.results.IsAuthenticatedResult;
 import com.cyanogen.ambient.callerinfo.util.CallerInfoHelper;
 import com.cyanogen.ambient.callerinfo.util.ProviderInfo;
-import com.cyanogen.ambient.common.api.AmbientApiClient;
 import com.cyanogen.ambient.common.api.PendingResult;
 import com.cyanogen.ambient.common.api.ResultCallback;
 import com.cyanogen.ambient.plugin.PluginStatus;
@@ -76,11 +75,11 @@ public class DialerSettingsActivity extends PreferenceActivity {
 
     private static final String AMBIENT_SUBSCRIPTION_ID = "DialerSettingsActivity";
 
-    CallMethodHelper.CallMethodReceiver pluginsUpdatedReceiver =
-            new CallMethodHelper.CallMethodReceiver() {
+    DialerDataSubscription.PluginChanged<CallMethodInfo> pluginsUpdatedReceiver =
+            new DialerDataSubscription.PluginChanged<CallMethodInfo>() {
                 @Override
-                public void onChanged(HashMap<ComponentName, CallMethodInfo> callMethodInfos) {
-                    providersUpdated(callMethodInfos);
+                public void onChanged(HashMap<ComponentName, CallMethodInfo> pluginInfos) {
+                    providersUpdated(pluginInfos);
                 }
             };
 
@@ -93,9 +92,10 @@ public class DialerSettingsActivity extends PreferenceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // Needs to be done prior to super's onCreate
-        if(CallMethodHelper.subscribe(AMBIENT_SUBSCRIPTION_ID, pluginsUpdatedReceiver)) {
-            providersUpdated(CallMethodHelper.getAllCallMethods());
-            CallMethodHelper.refreshDynamicItems();
+        DialerDataSubscription subscription = DialerDataSubscription.get(this);
+        if(subscription.subscribe(AMBIENT_SUBSCRIPTION_ID, pluginsUpdatedReceiver)) {
+            providersUpdated(subscription.getPluginInfo());
+            subscription.refreshDynamicItems();
         }
         if (CallerInfoHelper.getInstalledProviders(this).length > 0) {
             CallerInfoHelper.ResolvedProvider[] providers =
@@ -159,6 +159,22 @@ public class DialerSettingsActivity extends PreferenceActivity {
                 phoneAccountSettingsHeader.intent = phoneAccountSettingsIntent;
                 target.add(phoneAccountSettingsHeader);
             }
+
+            if (telephonyManager.isTtyModeSupported()
+                    || telephonyManager.isHearingAidCompatibilitySupported()) {
+                Header accessibilitySettingsHeader = new Header();
+                Intent accessibilitySettingsIntent =
+                        new Intent(TelecomManager.ACTION_SHOW_CALL_ACCESSIBILITY_SETTINGS);
+                accessibilitySettingsHeader.titleRes = R.string.accessibility_settings_title;
+                accessibilitySettingsHeader.intent = accessibilitySettingsIntent;
+                target.add(accessibilitySettingsHeader);
+            }
+
+            Header speedDialHeader = new Header();
+            Intent speedDialIntent = new Intent("com.android.phone.action.SPEED_DIAL_SETTINGS");
+            speedDialHeader.titleRes = R.string.speed_dial_settings;
+            speedDialHeader.intent = speedDialIntent;
+            target.add(speedDialHeader);
         }
 
         if (mSelectedProvider != null && mSelectedProviderInfo != null) {
@@ -180,12 +196,6 @@ public class DialerSettingsActivity extends PreferenceActivity {
             blockHidden.summaryRes = R.string.block_hidden_summary;
             target.add(blockHidden);
         }
-
-        Header speedDialHeader = new Header();
-        Intent speedDialIntent = new Intent("com.android.phone.action.SPEED_DIAL_SETTINGS");
-        speedDialHeader.titleRes = R.string.speed_dial_settings;
-        speedDialHeader.intent = speedDialIntent;
-        target.add(speedDialHeader);
 
         if (mCallProviders != null) {
             for (CallMethodInfo cmi : mCallProviders) {
@@ -213,8 +223,6 @@ public class DialerSettingsActivity extends PreferenceActivity {
                 }
             }
         }
-
-
 
         // invalidateHeaders does not rebuild
         // the list properly, so if an adapter is present already
@@ -295,7 +303,7 @@ public class DialerSettingsActivity extends PreferenceActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        CallMethodHelper.unsubscribe(AMBIENT_SUBSCRIPTION_ID);
+        DialerDataSubscription.get(this).unsubscribe(AMBIENT_SUBSCRIPTION_ID);
     }
 
     /**

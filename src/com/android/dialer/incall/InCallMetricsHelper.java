@@ -7,13 +7,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
-import com.android.dialer.DialerApplication;
 import com.android.dialer.DialtactsActivity;
-import com.android.dialer.incall.InCallMetricsReceiver;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.phone.common.ambient.AmbientConnection;
-import com.android.phone.common.incall.CallMethodHelper;
-import com.android.phone.common.incall.CallMethodInfo;
+import com.android.phone.common.incall.DialerDataSubscription;
+import com.android.phone.common.incall.api.InCallQueries;
 import com.cyanogen.ambient.analytics.AnalyticsServices;
 import com.cyanogen.ambient.analytics.Event;
 
@@ -42,7 +40,8 @@ public class InCallMetricsHelper {
         DISCOVERY_NUDGES("DISCOVERY_NUDGES"), // TODO
         AUTHENTICATION("AUTHENTICATION"), // TODO
         PROVIDER_STATE_CHANGE("PROVIDER_STATE_CHANGE"), //DONE
-        INAPP_NUDGES("INAPP_NUDGES");
+        INAPP_NUDGES("INAPP_NUDGES"),
+        INAPP_SELECTIONS("INAPP_SELECTIONS");
 
         private String mValue;
         Categories(String s) {
@@ -55,6 +54,7 @@ public class InCallMetricsHelper {
 
     public enum Events {
         NUDGE_EVENT_INTL("NUDGE_EVENT_INTL"), // TODO
+        NUDGE_EVENT_WIFI("NUDGE_EVENT_INTL"), // TODO
         NUDGE_EVENT_ROAMING("NUDGE_EVENT_ROAMING"), // TODO
         CALL_PROVIDER_VIDEO("CALL_PROVIDER_VIDEO"), //DONE
         CALL_PROVIDER_PSTN("CALL_PROVIDER_PSTN"), //DONE
@@ -67,7 +67,8 @@ public class InCallMetricsHelper {
         PROVIDER_DISABLED("PROVIDER_DISABLED"), //DONE
         PROVIDER_UNAVAILABLE("PROVIDER_UNAVAILABLE"), //DONE
         INAPP_NUDGE_DIALER_WIFI("INAPP_NUDGE_DIALER_WIFI"), // TODO
-        INAPP_NUDGE_DIALER_ROAMING("INAPP_NUDGE_DIALER_ROAMING"); // TODO
+        INAPP_NUDGE_DIALER_ROAMING("INAPP_NUDGE_DIALER_ROAMING"), // TODO
+        PROVIDER_SELECTED_SPINNER("PROVIDER_SELECTED_SPINNER");
 
         private String mValue;
         Events(String s) {
@@ -99,7 +100,8 @@ public class InCallMetricsHelper {
         COUNT_AUTOMATIC("COUNT_AUTOMATIC"),
         COUNT_MANUAL("COUNT_MANUAL"),
         COUNT("COUNT"),
-        COUNT_INTERACTIONS("COUNT_INTERACTIONS");
+        COUNT_INTERACTIONS("COUNT_INTERACTIONS"),
+        COUNT_DISMISS("COUNT_DISMISS");
 
         private String mValue;
         Parameters(String s) {
@@ -130,7 +132,7 @@ public class InCallMetricsHelper {
         InCallMetricsHelper helper = getInstance();
         helper.mContext = context;
 
-        AlarmManager am = (AlarmManager)context.getSystemService(Context.ALARM_SERVICE);
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         Intent i = new Intent(context, InCallMetricsReceiver.class);
 
         PendingIntent pi = PendingIntent.getService(context, 0, i, 0);
@@ -156,8 +158,8 @@ public class InCallMetricsHelper {
      * @param params fields that are part of the event
      * @param cn associated with the plugin
      */
-    public static Event sendEvent(Categories category, Events action,
-                                 HashMap<Parameters, Object> params, ComponentName cn) {
+    public static Event sendEvent(Context c, Categories category, Events action,
+            HashMap<Parameters, Object> params, ComponentName cn) {
         Event.Builder event = new Event.Builder(CATEGORY_BASE + category.value(), action.value());
         if (params != null && params.size() > 0) {
             for (Parameters p : params.keySet()) {
@@ -165,7 +167,7 @@ public class InCallMetricsHelper {
             }
         }
         Event e = event.build();
-        CallMethodHelper.shipAnalyticsToPlugin(cn, e);
+        InCallQueries.shipAnalyticsToPlugin(DialerDataSubscription.get(c).mClient, cn, e);
         getInstance().sendAmbientEvent(e);
         return e;
     }
@@ -183,7 +185,7 @@ public class InCallMetricsHelper {
     }
 
     @VisibleForTesting
-    /* package */ static String buildKey(ComponentName componentName, Categories category,
+    public static String buildKey(ComponentName componentName, Categories category,
                                          Events action, Parameters parameter) {
 
         return componentName.flattenToShortString() + DELIMIT + category.value() + DELIMIT +
@@ -316,6 +318,10 @@ public class InCallMetricsHelper {
      */
     public static void increaseCountOfMetric(ComponentName cn, Events event, Categories cat,
                                              Parameters param) {
+        if (cn == null) {
+            // this is only null if we do not have a sim card.
+            return;
+        }
         HashMap<Parameters, Object> metricsData = getStoredEventParams(cn, cat, event);
         metricsData.put(param, increaseCount(metricsData,param));
         storeEvent(cn, cat, event, metricsData);
@@ -354,7 +360,7 @@ public class InCallMetricsHelper {
     /**
      * Prepares all our metrics for sending.
      */
-    static void prepareToSend() {
+    static void prepareToSend(Context context) {
         SharedPreferences sp = getInstance().mContext.getSharedPreferences(
                 METRICS_SHARED_PREFERENCES, Context.MODE_PRIVATE);
         HashMap<String, HashMap<Parameters, Object>> items = getHashOfHashOfItems(sp.getAll());
@@ -367,7 +373,7 @@ public class InCallMetricsHelper {
             Categories category = Categories.valueOf(keyParts[CATEGORY]);
             Events event = Events.valueOf(keyParts[EVENT]);
             HashMap<Parameters, Object> params = items.get(key);
-            sendEvent(category, event, params, component);
+            sendEvent(context, category, event, params, component);
         }
     }
 
