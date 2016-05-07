@@ -90,14 +90,17 @@ public class CallStatsDetailActivity extends Activity implements
     private class UpdateContactTask extends AsyncTask<String, Void, ContactInfo> {
         @Override
         protected ContactInfo doInBackground(String... strings) {
-            ContactInfo info = mContactInfoHelper.lookupNumber(strings[0], strings[1]);
+            ContactInfo info = mContactInfoHelper.lookupNumber(strings[0], strings[1],
+                    Boolean.valueOf(strings[2]));
             return info;
         }
 
         @Override
         protected void onPostExecute(ContactInfo info) {
-            mData.updateFromInfo(info);
-            updateData();
+            if (info != null) {
+                mData.updateFromInfo(info);
+                updateData();
+            }
         }
     }
 
@@ -176,7 +179,8 @@ public class CallStatsDetailActivity extends Activity implements
     @Override
     public void onResume() {
         super.onResume();
-        new UpdateContactTask().execute(mData.number.toString(), mData.countryIso);
+        new UpdateContactTask().execute(mData.number.toString(), mData.countryIso,
+                String.valueOf(mData.isInCallPluginContactId));
     }
 
     @Override
