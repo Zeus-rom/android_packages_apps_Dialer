@@ -335,7 +335,8 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         public void onReceive(Context context, Intent intent) {
             switch (intent.getAction()) {
                 case ConnectivityManager.CONNECTIVITY_ACTION:
-                    if (mSmartDialSearchFragment != null) {
+                    if (mSmartDialSearchFragment != null && mSmartDialSearchFragment.isVisible()
+                            && mInDialpadSearch) {
                         mSmartDialSearchFragment.setupEmptyView();
                     }
                     break;
@@ -359,7 +360,8 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         updateSmartDialDatabase();
         mAvailableProviders.clear();
         CallMethodFilters.removeDisabled(availableCallMethods, mAvailableProviders);
-        if (mSmartDialSearchFragment != null) {
+        if (mSmartDialSearchFragment != null && mSmartDialSearchFragment.isVisible()
+                && mInDialpadSearch) {
             mSmartDialSearchFragment.setAvailableProviders(mAvailableProviders);
         }
 
@@ -916,6 +918,14 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         AnalyticsUtil.sendScreenView(mDialpadFragment);
         ft.commit();
 
+        if (isInSearchUi()) {
+            if (mInRegularSearch) {
+                mRegularSearchFragment.setupEmptyView();
+            } else {
+                mSmartDialSearchFragment.setupEmptyView();
+            }
+        }
+
         if (animate) {
             mFloatingActionButtonController.scaleOut();
         } else {
@@ -984,9 +994,11 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             if (mInRegularSearch) {
                 mRegularSearchFragment.updateCallCreditInfo();
                 mRegularSearchFragment.updateCoachMarkDrawable();
+                mRegularSearchFragment.setupEmptyView();
             } else {
                 mSmartDialSearchFragment.updateCallCreditInfo();
                 mSmartDialSearchFragment.updateCoachMarkDrawable();
+                mSmartDialSearchFragment.setupEmptyView();
             }
         }
     }
